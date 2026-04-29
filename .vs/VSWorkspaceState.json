@@ -1,0 +1,13 @@
+{
+  "ExpandedNodes": [
+    "",
+    "\\ai-sql-platform",
+    "\\ai-sql-platform\\server-python",
+    "\\ai-sql-platform\\server-python\\venv",
+    "\\ai-sql-platform\\server-python\\__pycache__",
+    "\\src",
+    "\\src\\lib"
+  ],
+  "SelectedNode": "\\src\\lib\\apiClient.ts",
+  "PreviewInSolutionExplorer": false
+}
