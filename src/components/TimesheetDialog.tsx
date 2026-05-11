@@ -17,6 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "sonner";
 
 type ProjectOption = {
@@ -213,16 +214,19 @@ export function TimesheetDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl rounded-3xl">
-        <DialogHeader>
-          <DialogTitle>Fill Timesheet</DialogTitle>
-          <DialogDescription>
-            Fill an 8-hour entry for the selected project. After the first entry, use history and just change the date.
-          </DialogDescription>
-        </DialogHeader>
-        {schemaHint ? <div className="text-xs text-muted-foreground">{schemaHint}</div> : null}
+      <DialogContent className="flex max-w-2xl h-[86vh] min-h-0 flex-col rounded-3xl p-0">
+        <div className="p-6 pb-4">
+          <DialogHeader>
+            <DialogTitle>Fill Timesheet</DialogTitle>
+            <DialogDescription>
+              Fill an 8-hour entry for the selected project. After the first entry, use history and just change the date.
+            </DialogDescription>
+          </DialogHeader>
+          {schemaHint ? <div className="mt-1 text-xs text-muted-foreground">{schemaHint}</div> : null}
+        </div>
 
-        <div className="grid gap-4 md:grid-cols-2">
+        <ScrollArea className="flex-1 min-h-0 px-6">
+          <div className="grid gap-4 pb-6 md:grid-cols-2">
           <div className="space-y-2 md:col-span-2">
             <div className="text-sm font-medium">Quick command (optional)</div>
             <Input
@@ -375,8 +379,9 @@ export function TimesheetDialog({
             ) : null}
           </div>
         </div>
+        </ScrollArea>
 
-        <DialogFooter className="gap-2 sm:gap-2">
+        <DialogFooter className="gap-2 border-t bg-background/80 p-4 backdrop-blur-sm sm:gap-2">
           <Button variant="outline" onClick={() => onOpenChange(false)} className="rounded-2xl">
             Cancel
           </Button>

@@ -7,7 +7,11 @@ export type TimesheetPromptPlan = {
   project_name?: string;
   effort_minutes: number;
   category?: string;
+  item?: string;
   description?: string;
+  related_to?: string;
+  engagement_role?: string;
+  engagement_location?: string;
   start_time?: string;
   end_time?: string;
   timeframe: TimesheetTimeframe;
@@ -160,6 +164,10 @@ export function parseTimesheetPrompt(message: string): TimesheetPromptPlan {
     timeframe,
     start_time: "09:00",
     end_time: "17:00",
-    description: category ? `Timesheet - ${category}` : "Timesheet entry",
+    item: category ? category : "Config",
+    related_to: "Project Module",
+    engagement_role: "Technical Consultant",
+    engagement_location: "Offsite",
+    description: category ? `Timesheet - ${category}` : "SDG development",
   };
 }

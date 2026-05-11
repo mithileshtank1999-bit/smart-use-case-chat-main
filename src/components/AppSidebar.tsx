@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
-  Bot,
   BriefcaseBusiness,
   Bug,
   ChevronDown,
@@ -41,6 +40,9 @@ import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { apiCall } from "@/lib/apiClient";
+
+const AGENT_IMAGE_SRC = "/businessnext.jpeg";
 
 const iconMap: Record<string, React.ElementType> = {
   LayoutDashboard,
@@ -144,10 +146,32 @@ export function AppSidebar({
     knowledge: false,
   });
   const [projectSearch, setProjectSearch] = useState(projectsQuery ?? "");
+  const [employeeSuggestions, setEmployeeSuggestions] = useState<string[]>([]);
 
   useEffect(() => {
     setProjectSearch(projectsQuery ?? "");
   }, [projectsQuery]);
+
+  useEffect(() => {
+    if (!onEmployeeNameChange) return;
+    const q = String(employeeName ?? "").trim();
+    if (q.length < 2) {
+      setEmployeeSuggestions([]);
+      return;
+    }
+
+    const handle = window.setTimeout(async () => {
+      const { data, error } = await apiCall("employee/search", undefined, {
+        method: "GET",
+        query: { q, limit: "12" },
+      });
+      if (error) return;
+      const results: string[] = Array.isArray(data?.results) ? data.results : [];
+      setEmployeeSuggestions(results);
+    }, 250);
+
+    return () => window.clearTimeout(handle);
+  }, [employeeName, onEmployeeNameChange]);
 
   useEffect(() => {
     if (!onSearchProjects) return;
@@ -199,8 +223,8 @@ export function AppSidebar({
                           {selectedProject?.project_name || "Choose a project to start"}
                         </div>
                       </div>
-                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/15 text-primary">
-                        <Bot className="h-5 w-5" />
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-white/10 bg-white/10">
+                        <img src={AGENT_IMAGE_SRC} alt="BUSINESSNEXT" className="h-full w-full object-contain p-1" />
                       </div>
                     </div>
 
@@ -260,9 +284,15 @@ export function AppSidebar({
                         <Input
                           value={employeeName ?? ""}
                           onChange={(e) => onEmployeeNameChange(e.target.value)}
+                          list="employee-suggestions"
                           placeholder="Type your name (e.g. Mithilesh Tank)"
                           className="h-9 border-white/10 bg-white/5 text-sidebar-foreground placeholder:text-sidebar-foreground/40 focus-visible:ring-1 focus-visible:ring-offset-0"
                         />
+                        <datalist id="employee-suggestions">
+                          {employeeSuggestions.map((name) => (
+                            <option key={name} value={name} />
+                          ))}
+                        </datalist>
                         <div className="mt-2 text-xs text-sidebar-foreground/50">
                           Shows allocated projects for the entered employee.
                         </div>
@@ -306,7 +336,7 @@ export function AppSidebar({
                               className={cn(
                                 "w-full rounded-xl border px-3 py-3 text-left transition",
                                 isSelected
-                                  ? "border-primary/40 bg-primary/15 text-white shadow-[0_0_0_1px_rgba(59,130,246,0.25)]"
+                                  ? "border-primary/40 bg-primary/15 text-white shadow-[0_0_0_1px_rgba(236,72,153,0.25)]"
                                   : "border-white/8 bg-white/5 text-sidebar-foreground/80 hover:bg-white/10 hover:text-sidebar-foreground"
                               )}
                             >
@@ -349,7 +379,7 @@ export function AppSidebar({
                           className={cn(
                             "rounded-2xl border transition",
                             activeInsideGroup
-                              ? "border-primary/30 bg-primary/10 shadow-[0_0_0_1px_rgba(59,130,246,0.2)]"
+                              ? "border-primary/30 bg-primary/10 shadow-[0_0_0_1px_rgba(236,72,153,0.2)]"
                               : "border-white/8 bg-white/5 hover:bg-white/8"
                           )}
                         >

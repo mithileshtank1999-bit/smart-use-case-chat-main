@@ -10,6 +10,7 @@ from sqlalchemy import text
 from db import SessionLocal
 from project_intel.core.config import DB_SCHEMA, TIMESHEET_ITEMS
 from project_intel.data.db_access import (
+    get_db_config,
     get_project_columns,
     get_project_id_column,
     get_project_name_column,
@@ -126,6 +127,45 @@ def find_employee_identity(employee_name: str) -> EmployeeIdentity | None:
             return None
         ownerid, userid, customobjectid = row[0], row[1], row[2]
         return EmployeeIdentity(int(ownerid), int(userid), int(customobjectid) if customobjectid is not None else None)
+    finally:
+        db.close()
+
+
+def search_employees(q: str, limit: int = 20) -> list[str]:
+    """
+    Lightweight employee name autocomplete.
+    Returns employee display names (employee.subject) matching the query substring.
+    """
+    needle = (q or "").strip()
+    if len(needle) < 2:
+        return []
+
+    db_type = (get_db_config().get("db_type") or "sqlserver").strip().lower()
+    schema = DB_SCHEMA or "dbo"
+    table = f"{schema}.employee"
+
+    # Prefer case-insensitive matching across DBs.
+    if db_type == "postgres":
+        where = "subject ILIKE :q"
+    else:
+        where = "LOWER(subject) LIKE LOWER(:q)"
+
+    db = SessionLocal()
+    try:
+        rows = db.execute(
+            text(
+                f"""
+                SELECT DISTINCT subject
+                FROM {table}
+                WHERE subject IS NOT NULL
+                  AND {where}
+                ORDER BY subject
+                LIMIT :limit
+                """
+            ),
+            {"q": f"%{needle}%", "limit": max(1, min(int(limit), 50))},
+        ).fetchall()
+        return [str(r[0]) for r in rows if r and r[0]]
     finally:
         db.close()
 

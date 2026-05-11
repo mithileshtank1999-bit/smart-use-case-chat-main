@@ -7,7 +7,6 @@ import { apiCall, getApiBaseUrl } from "@/lib/apiClient";
 import { supabase } from "@/integrations/supabase/client";
 import { streamChat, type Msg } from "@/lib/streamChat";
 import { toast } from "sonner";
-import { Bot } from "lucide-react";
 import { ExecutiveSummaryPanel, type ExecutiveProjectSummary } from "@/components/ExecutiveSummaryPanel";
 import type { ProjectRecord } from "@/components/ProjectResultsTable";
 import type { CSSProperties } from "react";
@@ -16,6 +15,8 @@ import { TimesheetDialog } from "@/components/TimesheetDialog";
 import { Button } from "@/components/ui/button";
 import { TimesheetPromptDialog } from "@/components/TimesheetPromptDialog";
 import { looksLikeTimesheetPrompt, parseTimesheetPrompt, type TimesheetPromptPlan } from "@/lib/timesheetPrompt";
+
+const AGENT_IMAGE_SRC = "/businessnext.jpeg";
 
 interface ProjectOption {
   project_id: string;
@@ -88,6 +89,11 @@ const Index = () => {
   const [timesheetOpen, setTimesheetOpen] = useState(false);
   const [timesheetPromptOpen, setTimesheetPromptOpen] = useState(false);
   const [timesheetPromptPlan, setTimesheetPromptPlan] = useState<TimesheetPromptPlan | null>(null);
+  const [timesheetPromptOptions, setTimesheetPromptOptions] = useState<{
+    items: string[];
+    engagementroleids: number[];
+    engagementlocationids: number[];
+  } | null>(null);
   const [isTimesheetPromptConfirming, setIsTimesheetPromptConfirming] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -389,6 +395,16 @@ const Index = () => {
         project_name: String(project.project_name),
       };
       setTimesheetPromptPlan(plan);
+
+      try {
+        const { data } = await apiCall("timesheet/options", undefined, { method: "GET", query: { project_id: String(project.project_id) } });
+        const next = (data?.options as any) ?? null;
+        if (next?.items && Array.isArray(next.items)) setTimesheetPromptOptions(next);
+        else setTimesheetPromptOptions(null);
+      } catch {
+        setTimesheetPromptOptions(null);
+      }
+
       setTimesheetPromptOpen(true);
       setMessages([
         ...newMessages,
@@ -497,8 +513,14 @@ const Index = () => {
         items.find((x) => category && x.toLowerCase().includes(category)) ||
         (category.includes("leave") ? items.find((x) => x.toLowerCase().includes("leave")) : undefined);
 
-      const item = matchedItem || (category ? category : "Config");
-      const description = (timesheetPromptPlan.description || "").trim() || "Timesheet entry";
+      const item =
+        (timesheetPromptPlan.item || "").trim() ||
+        matchedItem ||
+        (category ? category : "Config");
+      const description = (timesheetPromptPlan.description || "").trim() || "SDG development";
+      const related_to = (timesheetPromptPlan.related_to || "").trim() || "Project Module";
+      const engagement_role = (timesheetPromptPlan.engagement_role || "").trim() || "Technical Consultant";
+      const engagement_location = (timesheetPromptPlan.engagement_location || "").trim() || "Offsite";
 
       let okCount = 0;
       for (const work_date of dates) {
@@ -510,7 +532,10 @@ const Index = () => {
           end_time: timesheetPromptPlan.end_time || "17:00",
           effort_minutes: Number(timesheetPromptPlan.effort_minutes || 480),
           description,
+          related_to,
           item,
+          engagement_role,
+          engagement_location,
         };
         if (templateId) payload.template_timesheetid = templateId;
 
@@ -536,7 +561,7 @@ const Index = () => {
 
   return (
     <SidebarProvider style={{ "--sidebar-width": "24rem" } as CSSProperties}>
-      <div className="flex h-screen w-full overflow-hidden bg-[radial-gradient(circle_at_top,_rgba(59,130,246,0.08),_transparent_32%),linear-gradient(180deg,_#f8fafc_0%,_#eef2ff_100%)]">
+      <div className="flex h-screen w-full overflow-hidden bg-[radial-gradient(circle_at_top,_rgba(236,72,153,0.08),_transparent_32%),linear-gradient(180deg,_#f8fafc_0%,_#fdf2f8_100%)]">
         <AppSidebar
           conversations={conversations}
           activeConversationId={activeConversationId}
@@ -560,8 +585,8 @@ const Index = () => {
           <header className="h-14 shrink-0 flex items-center gap-3 border-b border-slate-200/80 px-4 bg-white/80 backdrop-blur-sm">
             <SidebarTrigger className="text-muted-foreground hover:text-foreground" />
             <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/15 text-primary">
-                <Bot className="h-5 w-5" />
+              <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border border-slate-200/70 bg-white/90">
+                <img src={AGENT_IMAGE_SRC} alt="BUSINESSNEXT" className="h-full w-full object-contain" />
               </div>
               <h1 className="text-base font-semibold text-foreground">Project Intelligence</h1>
             </div>
@@ -586,12 +611,16 @@ const Index = () => {
                     open={timesheetPromptOpen}
                     onOpenChange={(open) => {
                       setTimesheetPromptOpen(open);
-                      if (!open) setTimesheetPromptPlan(null);
+                      if (!open) {
+                        setTimesheetPromptPlan(null);
+                        setTimesheetPromptOptions(null);
+                      }
                     }}
                     plan={timesheetPromptPlan}
                     onPlanChange={setTimesheetPromptPlan}
                     employeeName={employeeName}
                     projectLabel={`${timesheetPromptPlan.project_name ?? ""} (ID ${timesheetPromptPlan.project_id})`}
+                    options={timesheetPromptOptions}
                     onConfirm={confirmTimesheetFromPrompt}
                     confirming={isTimesheetPromptConfirming}
                   />
@@ -621,8 +650,8 @@ const Index = () => {
                 {messages.length === 0 ? (
                   !showSummaryPanel && (
                     <div className="flex min-h-[58vh] flex-col items-center justify-center rounded-[2rem] border border-white/70 bg-white/65 px-6 text-center shadow-[0_18px_60px_rgba(15,23,42,0.08)] backdrop-blur-sm">
-                      <div className="mb-6 flex h-24 w-24 items-center justify-center rounded-[2rem] bg-primary/10 text-primary">
-                        <Bot className="h-10 w-10" />
+                      <div className="mb-6 flex h-24 w-24 items-center justify-center overflow-hidden rounded-[2rem] border border-slate-200/70 bg-white/90">
+                        <img src={AGENT_IMAGE_SRC} alt="BUSINESSNEXT" className="h-full w-full object-contain p-3" />
                       </div>
                       <h2 className="mb-3 text-4xl font-semibold tracking-tight text-foreground">
                         Project Intelligence Assistant

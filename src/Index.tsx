@@ -265,7 +265,7 @@ export default function Index() {
                                     padding: "10px 14px",
                                     borderRadius: 10,
                                     background:
-                                        message.role === "user" ? "#0b93f6" : "#444654",
+                                        message.role === "user" ? "#ec4899" : "#444654",
                                     whiteSpace: "pre-wrap",
                                 }}
                             >

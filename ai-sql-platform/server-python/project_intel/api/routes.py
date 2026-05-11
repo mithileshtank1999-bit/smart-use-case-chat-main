@@ -45,6 +45,7 @@ from project_intel.services.sql_service import is_select_from_projects_only
 from project_intel.data.timesheet_access import (
     fill_timesheet_entry,
     list_allocated_projects,
+    search_employees,
     list_timesheet_options,
     list_timesheet_templates,
     describe_table_columns,
@@ -788,6 +789,18 @@ async def employee_projects(name: str, q: str = "", limit: int = 200):
         return {"results": results, "count": len(results)}
     except Exception as error:
         return JSONResponse({"error": str(error)}, status_code=500)
+
+
+@router.get("/employee/search")
+async def employee_search(q: str, limit: int = 20):
+    """
+    Autocomplete helper for employee display names (employee.subject).
+    """
+    try:
+        results = search_employees(q, limit=limit)
+        return {"ok": True, "results": results, "count": len(results)}
+    except Exception as error:
+        return JSONResponse({"ok": False, "error": str(error)}, status_code=500)
 
 
 @router.get("/timesheet/options")

@@ -1,9 +1,11 @@
 import { useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Bot, User } from "lucide-react";
+import { User } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ProjectResultsTable, type ProjectRecord } from "./ProjectResultsTable";
+
+const AGENT_IMAGE_SRC = "/businessnext.jpeg";
 
 interface ChatMessageProps {
   role: "user" | "assistant";
@@ -47,8 +49,8 @@ export function ChatMessage({ role, content, onProjectClick }: ChatMessageProps)
   return (
     <div className={cn("flex gap-3 px-4 py-4", isUser ? "justify-end" : "justify-start")}>
       {!isUser && (
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-          <Bot className="h-5 w-5" />
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-slate-200/70 bg-white/80">
+          <img src={AGENT_IMAGE_SRC} alt="BUSINESSNEXT" className="h-full w-full object-contain" />
         </div>
       )}
       <div
@@ -92,8 +94,8 @@ export function ChatMessage({ role, content, onProjectClick }: ChatMessageProps)
 export function TypingIndicator() {
   return (
     <div className="flex gap-3 px-4 py-4">
-      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-        <Bot className="h-5 w-5" />
+      <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-slate-200/70 bg-white/80">
+        <img src={AGENT_IMAGE_SRC} alt="BUSINESSNEXT" className="h-full w-full object-contain" />
       </div>
       <div className="flex items-center gap-1.5 rounded-2xl rounded-bl-md bg-chat-ai px-4 py-3">
         <span className="h-2 w-2 rounded-full bg-muted-foreground animate-pulse-dot" />

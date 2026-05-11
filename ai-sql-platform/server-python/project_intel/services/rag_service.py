@@ -9,6 +9,7 @@ from project_intel.data.db_access import (
     get_project_columns,
     get_project_table_name,
     get_project_id_column,
+    get_project_name_column,
     make_json_safe,
     normalize_project_row,
 )

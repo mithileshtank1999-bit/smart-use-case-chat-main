@@ -26,7 +26,7 @@ interface ProjectResultsTableProps {
 const statusColor = (status: string) => {
   const normalizedStatus = status.toLowerCase();
   if (normalizedStatus === "active") return "bg-emerald-500/15 text-emerald-700 border-emerald-200";
-  if (normalizedStatus === "completed") return "bg-blue-500/15 text-blue-700 border-blue-200";
+  if (normalizedStatus === "completed") return "bg-pink-500/15 text-pink-700 border-pink-200";
   if (normalizedStatus === "delayed") return "bg-red-500/15 text-red-700 border-red-200";
   if (normalizedStatus === "in progress") return "bg-amber-500/15 text-amber-700 border-amber-200";
   if (normalizedStatus === "on hold") return "bg-gray-500/15 text-gray-600 border-gray-200";
