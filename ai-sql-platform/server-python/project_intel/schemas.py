@@ -74,3 +74,50 @@ class TimesheetCommandRequest(BaseModel):
     project_id: int
     employee_name: str
     command: str
+
+
+class DocumentSearchRequest(BaseModel):
+    query: str
+    top_k: int | None = 5
+
+
+class MeetingAnalyzeRequest(BaseModel):
+    transcript: str
+    project_name: str | None = None
+
+
+# ---- WSR (Weekly Status Report) ----
+
+class WSRDefects(BaseModel):
+    open: int = 0
+    closed: int = 0
+    in_progress: int = 0
+
+
+class WSRHighlight(BaseModel):
+    section: str
+    bullets: list[str]
+
+
+class WSRGroup(BaseModel):
+    group: str
+    items: list[str]
+
+
+class WSRRequest(BaseModel):
+    project_name: str
+    reporting_period: str
+    project_module: str | None = None
+    key_highlights: list[WSRHighlight] = []
+    blockers: list[str] = []
+    key_risks: list[WSRGroup] = []
+    next_week_plan: list[WSRGroup] = []
+    completion_percentage: int | None = None
+    report_recipients: list[str] = []
+    defects: WSRDefects | None = None
+    generated_by: str | None = None
+
+
+class WSRFromTextRequest(BaseModel):
+    text: str
+    send_email: bool = False

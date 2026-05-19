@@ -1,0 +1,105 @@
+{
+  "name": "Webhook Echo Test (Manual)",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "a1b2c3d4-0002-0002-0002-000000000001",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{\n  json: {\n    workflow: 'Webhook Echo Test',\n    triggered_at: new Date().toISOString(),\n    message: 'Hello from n8n!',\n    random_value: Math.floor(Math.random() * 100)\n  }\n}];"
+      },
+      "id": "a1b2c3d4-0002-0002-0002-000000000002",
+      "name": "Generate Test Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8000/api/n8n/webhook",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-N8N-Secret",
+              "value": "your-random-secret-here"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "id",
+              "value": "={{ $execution.id }}"
+            },
+            {
+              "name": "workflowId",
+              "value": "={{ $workflow.id }}"
+            },
+            {
+              "name": "status",
+              "value": "success"
+            },
+            {
+              "name": "mode",
+              "value": "manual"
+            },
+            {
+              "name": "startedAt",
+              "value": "={{ $execution.startedAt }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1b2c3d4-0002-0002-0002-000000000003",
+      "name": "Notify Backend Webhook",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const webhookResp = $('Notify Backend Webhook').first().json;\nconst payload = $('Generate Test Payload').first().json;\nreturn [{\n  json: {\n    status: 'complete',\n    backend_ack: webhookResp.ok === true,\n    payload_sent: payload\n  }\n}];"
+      },
+      "id": "a1b2c3d4-0002-0002-0002-000000000004",
+      "name": "Log Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [920, 300]
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [{ "node": "Generate Test Payload", "type": "main", "index": 0 }]
+      ]
+    },
+    "Generate Test Payload": {
+      "main": [
+        [{ "node": "Notify Backend Webhook", "type": "main", "index": 0 }]
+      ]
+    },
+    "Notify Backend Webhook": {
+      "main": [
+        [{ "node": "Log Result", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [{ "name": "testing" }, { "name": "webhook" }]
+}

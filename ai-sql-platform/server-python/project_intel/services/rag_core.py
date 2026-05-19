@@ -175,6 +175,21 @@ def chunk_project_row(row: dict) -> list[RagDocument]:
     return docs
 
 
+def _flatten_meta(meta: dict) -> dict:
+    """Coerce metadata values to ChromaDB-compatible types (str/int/float/bool)."""
+    flat: dict = {}
+    for k, v in (meta or {}).items():
+        if isinstance(v, bool):
+            flat[k] = v
+        elif isinstance(v, (int, float)):
+            flat[k] = v
+        elif v is None:
+            flat[k] = ""
+        else:
+            flat[k] = str(v)
+    return flat
+
+
 class LocalSentenceTransformerEmbedder:
     def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
         try:
@@ -318,6 +333,111 @@ class HybridRagIndex:
             if chunk_types and str(meta.get("chunk_type") or "") not in chunk_types:
                 continue
             results.append(doc)
+            if len(results) >= top_k:
+                break
+        return results
+
+
+# ---------------------------------------------------------------------------
+# ChromaDB persistent index (used when CHROMA_PERSIST_DIR is set)
+# ---------------------------------------------------------------------------
+
+class ChromaRagIndex:
+    """
+    Persistent RAG index backed by ChromaDB.
+    Implements the same interface as HybridRagIndex so rag_service.py can
+    swap between the two without any other changes.
+
+    Activate by setting the CHROMA_PERSIST_DIR environment variable to a
+    writable directory path (e.g. /data/chroma or ./chroma_store).
+    """
+
+    _COLLECTION_NAME = "project_rag"
+
+    def __init__(self, persist_dir: str, embedder: LocalSentenceTransformerEmbedder):
+        try:
+            import chromadb  # type: ignore[import]
+        except ImportError as exc:
+            raise RuntimeError(
+                "Missing dependency: chromadb. "
+                "Install it with: pip install 'chromadb>=0.5.0'"
+            ) from exc
+
+        self._embedder = embedder
+        self._client = chromadb.PersistentClient(path=persist_dir)
+        self._collection = self._client.get_or_create_collection(
+            name=self._COLLECTION_NAME,
+            # "ip" (inner product) matches cosine similarity when vectors are
+            # L2-normalised — which SentenceTransformer does by default.
+            metadata={"hnsw:space": "ip"},
+        )
+
+    @property
+    def size(self) -> int:
+        return self._collection.count()
+
+    def clear(self):
+        self._client.delete_collection(self._COLLECTION_NAME)
+        self._collection = self._client.get_or_create_collection(
+            name=self._COLLECTION_NAME,
+            metadata={"hnsw:space": "ip"},
+        )
+
+    def add_documents(self, docs: list[RagDocument]):
+        docs = [d for d in docs if d and d.text and d.text.strip()]
+        if not docs:
+            return
+        vectors = self._embedder.embed([d.text for d in docs])
+        self._collection.upsert(
+            ids=[d.doc_id for d in docs],
+            embeddings=vectors,
+            documents=[d.text for d in docs],
+            metadatas=[_flatten_meta(d.metadata) for d in docs],
+        )
+
+    def hybrid_search(
+        self,
+        query: str,
+        *,
+        top_k: int = 5,
+        project_name: str | None = None,
+        project_id: str | None = None,
+        chunk_types: set[str] | None = None,
+    ) -> list[RagDocument]:
+        query = normalize_text(query)
+        if not query or self.size == 0:
+            return []
+
+        q_vec = self._embedder.embed([query])[0]
+
+        where: dict | None = None
+        if chunk_types:
+            types = list(chunk_types)
+            where = {"chunk_type": types[0]} if len(types) == 1 else {"chunk_type": {"$in": types}}
+
+        n_results = min(top_k * 4, self.size)
+        kwargs: dict = dict(
+            query_embeddings=[q_vec],
+            n_results=n_results,
+            include=["documents", "metadatas", "distances"],
+        )
+        if where:
+            kwargs["where"] = where
+
+        raw = self._collection.query(**kwargs)
+
+        ids_list = (raw.get("ids") or [[]])[0]
+        docs_list = (raw.get("documents") or [[]])[0]
+        metas_list = (raw.get("metadatas") or [[]])[0]
+
+        results: list[RagDocument] = []
+        for doc_id, text, meta in zip(ids_list, docs_list, metas_list):
+            meta = meta or {}
+            if project_id and str(meta.get("project_id") or "").strip() != project_id:
+                continue
+            if project_name and project_name.lower() not in str(meta.get("project_name") or "").lower():
+                continue
+            results.append(RagDocument(doc_id=doc_id, text=text or "", metadata=meta))
             if len(results) >= top_k:
                 break
         return results

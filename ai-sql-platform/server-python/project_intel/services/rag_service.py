@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 
 from project_intel.core.config import EMBEDDING_MODEL_NAME, OPENAI_MODEL
@@ -7,18 +8,23 @@ from project_intel.core.openai_client import get_openai_clients
 from project_intel.data.db_access import (
     fetch_rows_sqlalchemy,
     get_project_columns,
-    get_project_table_name,
     get_project_id_column,
     get_project_name_column,
+    get_project_table_name,
     make_json_safe,
     normalize_project_row,
 )
 from project_intel.services.rag_core import (
+    ChromaRagIndex,
     HybridRagIndex,
     LocalSentenceTransformerEmbedder,
     chunk_project_row,
     parse_project_name_from_query,
 )
+
+logger = logging.getLogger(__name__)
+
+_CHROMA_PERSIST_DIR = os.getenv("CHROMA_PERSIST_DIR", "").strip()
 
 
 def is_pmo_rag_use_case(user_question: str) -> str | None:
@@ -32,11 +38,11 @@ def is_pmo_rag_use_case(user_question: str) -> str | None:
     return None
 
 
-RAG_INDEX: HybridRagIndex | None = None
+RAG_INDEX: HybridRagIndex | ChromaRagIndex | None = None
 RAG_INDEX_ERROR: str | None = None
 
 
-def ensure_rag_index() -> HybridRagIndex | None:
+def ensure_rag_index() -> HybridRagIndex | ChromaRagIndex | None:
     global RAG_INDEX, RAG_INDEX_ERROR
     if RAG_INDEX is not None:
         return RAG_INDEX
@@ -45,11 +51,20 @@ def ensure_rag_index() -> HybridRagIndex | None:
 
     try:
         embedder = LocalSentenceTransformerEmbedder(EMBEDDING_MODEL_NAME)
-        RAG_INDEX = HybridRagIndex(embedder)
+        if _CHROMA_PERSIST_DIR:
+            RAG_INDEX = ChromaRagIndex(_CHROMA_PERSIST_DIR, embedder)
+            logger.info(
+                "RAG: ChromaDB persistent index at %s (docs=%d)",
+                _CHROMA_PERSIST_DIR,
+                RAG_INDEX.size,
+            )
+        else:
+            RAG_INDEX = HybridRagIndex(embedder)
+            logger.info("RAG: in-memory FAISS index (set CHROMA_PERSIST_DIR for persistence)")
         return RAG_INDEX
     except Exception as exc:
         RAG_INDEX_ERROR = str(exc)
-        print("RAG INIT ERROR:", RAG_INDEX_ERROR)
+        logger.error("RAG init error: %s", RAG_INDEX_ERROR)
         return None
 
 
@@ -139,6 +154,12 @@ def rebuild_rag_index(project_name: str | None = None, project_id: str | None = 
 
 
 def build_rag_prompt(use_case: str, project_name: str, context_docs: list[dict]) -> str:
+    """
+    Builds the instruction prompt for the LLM.
+
+    Keep this prompt ASCII-safe: some terminals and file encodings produced mojibake
+    for emoji + special dash characters, which degrades model responses and UX.
+    """
     import json
 
     context_json = json.dumps(context_docs, ensure_ascii=False, indent=2)
@@ -151,7 +172,7 @@ You are a PMO AI Assistant responsible for generating a Key Timeline Milestones 
 Use ONLY the evidence in the Context Chunks (JSON). Do not guess missing dates; use "Not available".
 
 Output (markdown):
-🗓️ Milestones Overview
+## Milestones Overview
 | Milestone | Date/Range |
 |---|---|
 | Project Start Date | ... |
@@ -161,11 +182,11 @@ Output (markdown):
 | UAT Phase | ... |
 | Go-Live Date | ... |
 
-🔎 Summary Highlights
-- <2–3 bullets, 1 sentence each>
+## Summary Highlights
+- <2-3 bullets, 1 sentence each>
 
 The LAST line must be exactly:
-Overall Timeline Health: <Green/Amber/Red> — <1 sentence rationale>
+Overall Timeline Health: <Green/Amber/Red> - <1 sentence rationale>
 
 Project: {project_label}
 
@@ -180,18 +201,18 @@ You are a PMO AI Assistant generating an Executive Project Health Summary for le
 Use ONLY the evidence in the Context Chunks (JSON). Do not infer numbers or dates that are not present.
 
 Output (markdown):
-✅ Health Snapshot
+## Health Snapshot
 - Overall: ...
 - Schedule: ...
 - Financial: ...
 - Delivery: ...
 - Risk: ...
 
-🔎 Key Drivers
-- <2–4 bullets, 1 sentence each>
+## Key Drivers
+- <2-4 bullets, 1 sentence each>
 
 The LAST line must be exactly:
-Overall Health: <Green/Amber/Red> — <1 sentence rationale>
+Overall Health: <Green/Amber/Red> - <1 sentence rationale>
 
 Project: {project_label}
 
@@ -205,14 +226,14 @@ You are a PMO AI Assistant generating a concise Risk Indicators Summary for lead
 Use ONLY the evidence in the Context Chunks (JSON). If risks are missing, say so clearly.
 
 Output (markdown):
-⚠️ Risk Indicators
-- <3–6 bullets; include severity/impact when available>
+## Risk Indicators
+- <3-6 bullets; include severity/impact when available>
 
-✅ Mitigation Focus
-- <2–4 bullets; actionable, ownership-oriented>
+## Mitigation Focus
+- <2-4 bullets; actionable, ownership-oriented>
 
 The LAST line must be exactly:
-Overall Risk Posture: <Green/Amber/Red> — <1 sentence rationale>
+Overall Risk Posture: <Green/Amber/Red> - <1 sentence rationale>
 
 Project: {project_label}
 
@@ -238,7 +259,11 @@ def chat_via_rag(user_msg: str) -> dict:
     if idx.size == 0:
         rebuild_rag_index(project_name=project_name or None)
 
-    chunk_types = {"milestone"} if rag_use_case == "timeline" else ({"health", "governance"} if rag_use_case == "health" else {"risk", "health"})
+    chunk_types = (
+        {"milestone"}
+        if rag_use_case == "timeline"
+        else ({"health", "governance"} if rag_use_case == "health" else {"risk", "health"})
+    )
     hits = idx.hybrid_search(
         user_msg,
         top_k=6,

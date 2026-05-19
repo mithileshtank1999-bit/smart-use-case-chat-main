@@ -1,0 +1,76 @@
+{
+  "name": "Platform Health Check (Every 5 min)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      },
+      "id": "a1b2c3d4-0001-0001-0001-000000000001",
+      "name": "Every 5 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "url": "http://host.docker.internal:8000/api/healthz",
+        "options": {}
+      },
+      "id": "a1b2c3d4-0001-0001-0001-000000000002",
+      "name": "Check /healthz",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "url": "http://host.docker.internal:8000/api/readyz",
+        "options": {}
+      },
+      "id": "a1b2c3d4-0001-0001-0001-000000000003",
+      "name": "Check /readyz (DB ping)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const healthz = $('Check /healthz').first().json;\nconst readyz  = $('Check /readyz (DB ping)').first().json;\nreturn [{\n  json: {\n    checked_at: new Date().toISOString(),\n    api_ok:     healthz.ok === true,\n    db_ok:      readyz.ok  === true,\n    summary:    `API=${healthz.ok ? 'UP' : 'DOWN'} DB=${readyz.ok ? 'UP' : 'DOWN'}`\n  }\n}];"
+      },
+      "id": "a1b2c3d4-0001-0001-0001-000000000004",
+      "name": "Build Status Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [920, 300]
+    }
+  ],
+  "connections": {
+    "Every 5 Minutes": {
+      "main": [
+        [{ "node": "Check /healthz", "type": "main", "index": 0 }]
+      ]
+    },
+    "Check /healthz": {
+      "main": [
+        [{ "node": "Check /readyz (DB ping)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Check /readyz (DB ping)": {
+      "main": [
+        [{ "node": "Build Status Report", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [{ "name": "monitoring" }]
+}

@@ -13,7 +13,7 @@ import uuid
 from pathlib import Path
 
 from dotenv import dotenv_values, set_key
-from fastapi import Body
+from fastapi import Body, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from project_intel.api.app import create_app
@@ -53,12 +53,28 @@ def _get_or_create_connection_id() -> str:
     return new_id
 
 
+def _assert_local_db_settings_allowed(request: Request) -> None:
+    """
+    These endpoints exist only to support local/dev usage (Settings page persisting DB_* values).
+    In production, persisting secrets via an unauthenticated HTTP endpoint is unsafe.
+    """
+    enabled = (os.getenv("ENABLE_LOCAL_DB_SETTINGS") or "").strip().lower() in ("1", "true", "yes", "y")
+    if not enabled:
+        # Hide the endpoint completely unless explicitly enabled.
+        raise HTTPException(status_code=404, detail="Not found")
+
+    client_host = getattr(getattr(request, "client", None), "host", "") or ""
+    if client_host not in ("127.0.0.1", "::1", "localhost"):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+
 @app.get("/api/db-connections")
-async def get_db_connections():
+async def get_db_connections(request: Request):
     """
     Local-only helper used by the Settings page when running without Supabase.
     Reads connection info from `server-python/.env` / process env vars.
     """
+    _assert_local_db_settings_allowed(request)
     env = {**dotenv_values(ENV_PATH), **os.environ}
     conn_id = (env.get("DB_CONNECTION_ID") or "").strip() or _get_or_create_connection_id()
     db_type = (env.get("DB_TYPE") or "sqlserver").strip().lower() or "sqlserver"
@@ -77,11 +93,12 @@ async def get_db_connections():
 
 
 @app.post("/api/db-connections")
-async def upsert_db_connections(payload: DbConnectionPayload = Body(...)):
+async def upsert_db_connections(request: Request, payload: DbConnectionPayload = Body(...)):
     """
     Local-only helper used by the Settings page when running without Supabase.
     Persists DB_* settings to `server-python/.env` and updates process env vars.
     """
+    _assert_local_db_settings_allowed(request)
     _ensure_env_file_exists()
 
     conn_id = (payload.id or "").strip() or _get_or_create_connection_id()
@@ -111,4 +128,3 @@ async def upsert_db_connections(payload: DbConnectionPayload = Body(...)):
     os.environ["DB_USER"] = (payload.username or "").strip()
 
     return {"id": conn_id}
-

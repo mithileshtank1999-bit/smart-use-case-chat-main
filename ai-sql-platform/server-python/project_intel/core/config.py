@@ -64,3 +64,10 @@ DB_SCHEMA = _safe_identifier(os.getenv("DB_SCHEMA", "dbo"), "dbo")
 # Timesheet: optional comma-separated list of allowed/commonly-used "items"
 # (stored in dbo.timesheet.relatedtoname in this app's default mapping).
 TIMESHEET_ITEMS = [v.strip() for v in os.getenv("TIMESHEET_ITEMS", "").split(",") if v.strip()]
+
+# ---------------------------------------------------------------------------
+# n8n Automation integration
+# ---------------------------------------------------------------------------
+N8N_BASE_URL = (os.getenv("N8N_BASE_URL") or "").rstrip("/")
+N8N_API_KEY = os.getenv("N8N_API_KEY") or ""
+N8N_WEBHOOK_SECRET = os.getenv("N8N_WEBHOOK_SECRET") or ""

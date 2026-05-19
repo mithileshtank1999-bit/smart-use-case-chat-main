@@ -1,0 +1,66 @@
+{
+  "name": "Error Simulation (tests failure tracking)",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "a1b2c3d4-0003-0003-0003-000000000001",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Randomly succeed or fail to simulate real-world flakiness\nconst shouldFail = Math.random() < 0.5;\nif (shouldFail) {\n  throw new Error('Simulated failure: external service timeout after 30s');\n}\nreturn [{ json: { status: 'ok', processed_at: new Date().toISOString() } }];"
+      },
+      "id": "a1b2c3d4-0003-0003-0003-000000000002",
+      "name": "Flaky Step (50% fail rate)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "url": "http://host.docker.internal:8000/api/healthz",
+        "options": {}
+      },
+      "id": "a1b2c3d4-0003-0003-0003-000000000003",
+      "name": "Downstream API Call",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{\n  json: {\n    workflow: 'Error Simulation',\n    completed_at: new Date().toISOString(),\n    result: 'success'\n  }\n}];"
+      },
+      "id": "a1b2c3d4-0003-0003-0003-000000000004",
+      "name": "Success Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [920, 300]
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [{ "node": "Flaky Step (50% fail rate)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Flaky Step (50% fail rate)": {
+      "main": [
+        [{ "node": "Downstream API Call", "type": "main", "index": 0 }]
+      ]
+    },
+    "Downstream API Call": {
+      "main": [
+        [{ "node": "Success Output", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [{ "name": "testing" }, { "name": "error-simulation" }]
+}

@@ -11,3 +11,20 @@ faiss-cpu>=1.8.0
 numpy>=1.26.0
 pyodbc>=5.0.0
 psycopg2-binary>=2.9.9
+
+# --- Phase 2: Security ---
+python-jose[cryptography]>=3.3.0   # JWT verification (Supabase / Azure AD / Auth0)
+
+# --- Phase 2: Rate limiting ---
+slowapi>=0.1.9                      # per-IP rate limiting for FastAPI
+
+# --- Phase 5: SQL guardrails ---
+sqlglot>=25.0.0                     # AST-based SQL validation (safe readonly checks)
+
+# --- Phase 3: Persistent RAG ---
+chromadb>=0.5.0                     # persistent vector store (set CHROMA_PERSIST_DIR to activate)
+
+# --- Phase 4: Document upload pipeline ---
+pypdf>=4.0.0                        # PDF text extraction
+python-docx>=1.1.0                  # DOCX text extraction
+fpdf2>=2.7.0                        # PDF generation for WSR reports

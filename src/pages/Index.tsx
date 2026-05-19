@@ -15,6 +15,14 @@ import { TimesheetDialog } from "@/components/TimesheetDialog";
 import { Button } from "@/components/ui/button";
 import { TimesheetPromptDialog } from "@/components/TimesheetPromptDialog";
 import { looksLikeTimesheetPrompt, parseTimesheetPrompt, type TimesheetPromptPlan } from "@/lib/timesheetPrompt";
+import { JobProgressBanner } from "@/components/JobProgressBanner";
+import { DocumentUploadPanel } from "@/components/DocumentUploadPanel";
+import { WSRReportPanel, type GeneratedReport } from "@/components/WSRReportPanel";
+import { MeetingSummaryPanel, type MeetingReport } from "@/components/MeetingSummaryPanel";
+import { DownloadCenterPanel, type DownloadItem } from "@/components/DownloadCenterPanel";
+import { N8NMonitorPanel } from "@/components/N8NMonitorPanel";
+import { PortfolioSummaryPanel } from "@/components/PortfolioSummaryPanel";
+import { OrgSummaryPanel } from "@/components/OrgSummaryPanel";
 
 const AGENT_IMAGE_SRC = "/businessnext.jpeg";
 
@@ -30,17 +38,21 @@ interface ProjectOption {
   [key: string]: unknown;
 }
 
+interface PortfolioOption {
+  portfolio_id: string;
+  portfolio_name: string;
+  project_count?: number;
+  active_projects?: number;
+  escalated_projects?: number;
+}
+
+type LevelType = "organisation" | "portfolio" | "project";
+type PanelName = "documents" | "wsr" | "meeting" | "downloads" | "n8n-monitor";
+
+// Only patterns with NO backend handler at all. Everything else goes to the server.
 const unsupportedUseCasePatterns = [
-  "timesheet",
-  "test case",
-  "defect",
-  "travel desk",
-  "help desk",
-  "meeting",
   "resource allocation",
-  "document",
-  "uploaded document",
-  "transcript",
+  "optimize resource",
 ];
 
 function isUnsupportedUseCase(message: string) {
@@ -95,6 +107,13 @@ const Index = () => {
     engagementlocationids: number[];
   } | null>(null);
   const [isTimesheetPromptConfirming, setIsTimesheetPromptConfirming] = useState(false);
+  const [openPanel, setOpenPanel] = useState<PanelName | null>(null);
+  const [downloads, setDownloads] = useState<DownloadItem[]>([]);
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  const [level, setLevel] = useState<LevelType>("project");
+  const [portfolios, setPortfolios] = useState<PortfolioOption[]>([]);
+  const [portfoliosLoading, setPortfoliosLoading] = useState(false);
+  const [selectedPortfolio, setSelectedPortfolio] = useState<PortfolioOption | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -210,6 +229,27 @@ const Index = () => {
     setIsSummaryLoading(false);
   }, []);
 
+  const fetchPortfolios = useCallback(async () => {
+    setPortfoliosLoading(true);
+    const { data, error } = await apiCall("portfolios", undefined, { method: "GET" });
+    setPortfoliosLoading(false);
+    if (!error && Array.isArray(data?.results)) {
+      setPortfolios(data.results as PortfolioOption[]);
+    }
+  }, []);
+
+  const handleLevelChange = useCallback((newLevel: LevelType) => {
+    setLevel(newLevel);
+    if (newLevel === "portfolio" && portfolios.length === 0) {
+      fetchPortfolios();
+    }
+  }, [portfolios.length, fetchPortfolios]);
+
+  const handleSelectPortfolio = useCallback((portfolioId: string) => {
+    const portfolio = portfolios.find((p) => p.portfolio_id === portfolioId) || null;
+    setSelectedPortfolio(portfolio);
+  }, [portfolios]);
+
   const handleFillTimesheet = useCallback(async () => {
     if (!selectedProject?.project_id) {
       toast.error("Select a project first.");
@@ -269,9 +309,16 @@ const Index = () => {
 
   const handleSelectUseCase = (prompt: string, label: string) => {
     setActiveUseCaseLabel(label);
-    const resolved = selectedProject
-      ? prompt.replace(/\{project_name\}/g, selectedProject.project_name)
-      : prompt;
+    let resolved = prompt;
+    if (selectedProject) {
+      resolved = resolved.replace(/\{project_name\}/g, selectedProject.project_name);
+      if (selectedProject.portfolio_name)
+        resolved = resolved.replace(/\{portfolio_name\}/g, selectedProject.portfolio_name as string);
+      if (selectedProject.account_name)
+        resolved = resolved.replace(/\{account_name\}/g, selectedProject.account_name as string);
+    }
+    if (employeeName.trim())
+      resolved = resolved.replace(/\{employee_name\}/g, employeeName.trim());
     setInputValue(resolved);
   };
 
@@ -580,27 +627,44 @@ const Index = () => {
           summaryError={summaryError}
           onSelectProject={handleSelectProject}
           onRetrySummary={selectedProject ? () => fetchProjectSummary(selectedProject) : undefined}
+          onOpenPanel={setOpenPanel}
+          level={level}
+          onLevelChange={handleLevelChange}
+          portfolios={portfolios}
+          portfoliosLoading={portfoliosLoading}
+          selectedPortfolio={selectedPortfolio}
+          onSelectPortfolio={handleSelectPortfolio}
         />
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-          <header className="h-14 shrink-0 flex items-center gap-3 border-b border-slate-200/80 px-4 bg-white/80 backdrop-blur-sm">
-            <SidebarTrigger className="text-muted-foreground hover:text-foreground" />
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border border-slate-200/70 bg-white/90">
-                <img src={AGENT_IMAGE_SRC} alt="BUSINESSNEXT" className="h-full w-full object-contain" />
+          <header className="shrink-0 border-b border-slate-200/80 bg-white/80 backdrop-blur-sm">
+            <div className="h-14 flex items-center gap-3 px-4">
+              <SidebarTrigger className="text-muted-foreground hover:text-foreground" />
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border border-slate-200/70 bg-white/90">
+                  <img src={AGENT_IMAGE_SRC} alt="BUSINESSNEXT" className="h-full w-full object-contain" />
+                </div>
+                <h1 className="text-base font-semibold text-foreground">
+                  {level === "organisation" ? "Organisation Intelligence" : level === "portfolio" ? "Portfolio Intelligence" : "Project Intelligence"}
+                </h1>
               </div>
-              <h1 className="text-base font-semibold text-foreground">Project Intelligence</h1>
+              <div className="ml-auto flex items-center gap-2">
+                {selectedProject && (
+                  <Button
+                    variant="outline"
+                    className="rounded-2xl"
+                    onClick={() => setTimesheetOpen(true)}
+                  >
+                    Timesheet
+                  </Button>
+                )}
+              </div>
             </div>
-            <div className="ml-auto flex items-center gap-2">
-              {selectedProject && (
-                <Button
-                  variant="outline"
-                  className="rounded-2xl"
-                  onClick={() => setTimesheetOpen(true)}
-                >
-                  Timesheet
-                </Button>
-              )}
-            </div>
+            {activeJobId && (
+              <JobProgressBanner
+                jobId={activeJobId}
+                onDismiss={() => setActiveJobId(null)}
+              />
+            )}
           </header>
 
           <div className="min-h-0 flex-1 overflow-hidden">
@@ -625,7 +689,22 @@ const Index = () => {
                     confirming={isTimesheetPromptConfirming}
                   />
                 )}
-                {showSummaryPanel && (
+                {level === "organisation" && (
+                  <div className="mb-8">
+                    <OrgSummaryPanel />
+                  </div>
+                )}
+
+                {level === "portfolio" && selectedPortfolio && (
+                  <div className="mb-8">
+                    <PortfolioSummaryPanel
+                      portfolioId={selectedPortfolio.portfolio_id}
+                      portfolioName={selectedPortfolio.portfolio_name}
+                    />
+                  </div>
+                )}
+
+                {level === "project" && showSummaryPanel && (
                   <div className="mb-8">
                     <ExecutiveSummaryPanel
                       projectName={selectedProject?.project_name}
@@ -647,17 +726,65 @@ const Index = () => {
                   onEmployeeNameChange={setEmployeeName}
                 />
 
+                <DocumentUploadPanel
+                  open={openPanel === "documents"}
+                  onOpenChange={(v) => setOpenPanel(v ? "documents" : null)}
+                />
+
+                <WSRReportPanel
+                  open={openPanel === "wsr"}
+                  onOpenChange={(v) => setOpenPanel(v ? "wsr" : null)}
+                  defaultProjectName={selectedProject?.project_name}
+                  onReportGenerated={(r: GeneratedReport) =>
+                    setDownloads((prev) => [r as DownloadItem, ...prev])
+                  }
+                />
+
+                <MeetingSummaryPanel
+                  open={openPanel === "meeting"}
+                  onOpenChange={(v) => setOpenPanel(v ? "meeting" : null)}
+                  onReportGenerated={(r: MeetingReport) =>
+                    setDownloads((prev) => [r as DownloadItem, ...prev])
+                  }
+                />
+
+                <DownloadCenterPanel
+                  open={openPanel === "downloads"}
+                  onOpenChange={(v) => setOpenPanel(v ? "downloads" : null)}
+                  items={downloads}
+                  onRemove={(id) => setDownloads((prev) => prev.filter((d) => d.id !== id))}
+                />
+
+                {openPanel === "n8n-monitor" && (
+                  <div className="mb-8">
+                    <div className="mb-4 flex items-center justify-between">
+                      <h2 className="text-xl font-semibold tracking-tight">Automation Monitor</h2>
+                      <button
+                        onClick={() => setOpenPanel(null)}
+                        className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                      >
+                        ✕ Close
+                      </button>
+                    </div>
+                    <N8NMonitorPanel />
+                  </div>
+                )}
+
                 {messages.length === 0 ? (
-                  !showSummaryPanel && (
+                  !(level === "organisation" || (level === "portfolio" && selectedPortfolio) || (level === "project" && showSummaryPanel)) && (
                     <div className="flex min-h-[58vh] flex-col items-center justify-center rounded-[2rem] border border-white/70 bg-white/65 px-6 text-center shadow-[0_18px_60px_rgba(15,23,42,0.08)] backdrop-blur-sm">
                       <div className="mb-6 flex h-24 w-24 items-center justify-center overflow-hidden rounded-[2rem] border border-slate-200/70 bg-white/90">
                         <img src={AGENT_IMAGE_SRC} alt="BUSINESSNEXT" className="h-full w-full object-contain p-3" />
                       </div>
                       <h2 className="mb-3 text-4xl font-semibold tracking-tight text-foreground">
-                        Project Intelligence Assistant
+                        {level === "portfolio" ? "Portfolio Intelligence" : "Project Intelligence Assistant"}
                       </h2>
                       <p className="max-w-2xl text-lg leading-8 text-muted-foreground">
-                        Select a project from the sidebar to view the executive summary, then choose a use case or ask your own question about planning, timesheets, defects, or test cases.
+                        {level === "portfolio"
+                          ? selectedPortfolio
+                            ? `Viewing ${selectedPortfolio.portfolio_name}. Ask about portfolio summary, timesheet hours, revenue, or project health.`
+                            : "Select a portfolio from the sidebar, then ask about its summary, timesheet hours, revenue pipeline, or project health."
+                          : "Select a project from the sidebar to view the executive summary, then choose a use case or ask your own question about planning, timesheets, defects, or test cases."}
                       </p>
                     </div>
                   )

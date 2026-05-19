@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s \"http://127.0.0.1:8000/api/healthz\")",
+      "Bash(grep -E \"^\\\\s+[0-9]+\\\\s+dbo\\\\.\\(project|portfolio|employee|timesheet|allocation|cases|testcase|module|contract|build|workunit|revenue|risks|action|activity|account\\)\" \\\\ *)",
+      "Read(//c/Users/MithileshTank/AppData/Local/Temp/**)"
+    ]
+  }
+}

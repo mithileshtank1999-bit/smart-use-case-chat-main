@@ -142,14 +142,23 @@ export function looksLikeTimesheetPrompt(message: string) {
     lower.includes("time-sheet") ||
     /\bts\b/.test(lower);
 
-  const intent =
+  // Summary / report / retrieve queries go to the backend, not the fill dialog.
+  const isSummaryOrReport =
+    lower.includes("summary") ||
+    lower.includes("report") ||
+    lower.includes("retrieve") ||
+    lower.includes("booking") ||
+    lower.includes("pending");
+
+  // Explicit fill-intent words, or a duration token like "8h"/"8 hours".
+  const hasFillIntent =
     lower.includes("fill") ||
     lower.includes("enter") ||
     lower.includes("log") ||
     lower.includes("submit") ||
-    (lower.includes("time") && lower.includes("sheet"));
+    /\b\d+\s*(h|hr|hrs|hour|hours)\b/.test(lower);
 
-  return mentionsTimesheet && intent;
+  return mentionsTimesheet && hasFillIntent && !isSummaryOrReport;
 }
 
 export function parseTimesheetPrompt(message: string): TimesheetPromptPlan {

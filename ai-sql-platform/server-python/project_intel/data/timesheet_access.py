@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime, time
 import os
+import re
 import uuid
 
 from sqlalchemy import text
@@ -11,11 +12,14 @@ from db import SessionLocal
 from project_intel.core.config import DB_SCHEMA, TIMESHEET_ITEMS
 from project_intel.data.db_access import (
     get_db_config,
+    get_project_account_name_column,
     get_project_columns,
     get_project_id_column,
     get_project_name_column,
+    get_project_portfolio_name_column,
     get_project_status_column,
     get_project_table_name,
+    make_json_safe,
 )
 
 
@@ -543,3 +547,243 @@ def fill_timesheet_entry(
         raise
     finally:
         db.close()
+
+
+# ---------------------------------------------------------------------------
+# Read-only timesheet summary helpers
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class TimesheetSummaryResult:
+    ok: bool
+    rows: list[dict] | None = None
+    count: int = 0
+    error: str | None = None
+    note: str | None = None
+
+
+def _ts_db_type() -> str:
+    return (get_db_config().get("db_type") or "sqlserver").strip().lower()
+
+
+def _ts_like(col: str, param: str) -> str:
+    if _ts_db_type() == "postgres":
+        return f"{col} ILIKE :{param}"
+    return f"LOWER({col}) LIKE LOWER(:{param})"
+
+
+def _ts_limit(sql: str, limit: int) -> str:
+    safe = max(1, min(int(limit), 500))
+    s = sql.strip()
+    if _ts_db_type() == "postgres":
+        return f"{s} LIMIT {safe}"
+    m = re.match(r"^(select\s+)(distinct\s+)?", s, re.IGNORECASE)
+    if not m:
+        return s
+    distinct = (m.group(2) or "").strip()
+    rest = s[m.end():]
+    if distinct:
+        return f"SELECT DISTINCT TOP {safe} {rest}"
+    return f"SELECT TOP {safe} {rest}"
+
+
+def _ts_fetch(sql: str, params: dict) -> list[dict]:
+    db = SessionLocal()
+    try:
+        rows = db.execute(text(sql), params).mappings().fetchall()
+        return make_json_safe([dict(r) for r in rows])
+    finally:
+        db.close()
+
+
+def _ts_tables() -> tuple[str, str, str, str, str]:
+    """Returns (ts, emp, proj, id_col, name_col) qualified table references."""
+    schema = DB_SCHEMA or "dbo"
+    ts = f"{schema}.timesheet"
+    emp = f"{schema}.employee"
+    proj = f"{schema}.{get_project_table_name()}"
+    id_col = get_project_id_column()
+    name_col = get_project_name_column()
+    return ts, emp, proj, id_col, name_col
+
+
+def get_employee_timesheet_summary(*, employee_name: str, limit: int = 200) -> TimesheetSummaryResult:
+    """Timesheet entries grouped by project and date for one employee."""
+    ts, emp, proj, id_col, name_col = _ts_tables()
+    sql = f"""
+        SELECT
+            e.subject AS employee_name,
+            p.{name_col} AS project_name,
+            CAST(t.startdate AS DATE) AS work_date,
+            COUNT(*) AS entries,
+            SUM(t.effort) AS total_effort_minutes,
+            ROUND(CAST(SUM(t.effort) AS FLOAT) / 60.0, 1) AS total_hours
+        FROM {ts} t
+        JOIN {emp} e ON e.userid = t.assigntoid AND e.ownerid = t.ownerid
+        JOIN {proj} p ON p.{id_col} = t.projectid
+        WHERE {_ts_like("e.subject", "emp_name")}
+        GROUP BY e.subject, p.{name_col}, CAST(t.startdate AS DATE)
+        ORDER BY work_date DESC, project_name
+    """
+    sql = _ts_limit(sql, limit)
+    try:
+        rows = _ts_fetch(sql, {"emp_name": f"%{employee_name}%"})
+        return TimesheetSummaryResult(ok=True, rows=rows, count=len(rows))
+    except Exception as exc:
+        return TimesheetSummaryResult(ok=False, error=str(exc), note="Ensure timesheet, employee, and project tables exist.")
+
+
+def get_project_timesheet_summary(*, project_name: str, limit: int = 200) -> TimesheetSummaryResult:
+    """Timesheet entries grouped by employee and date for one project."""
+    ts, emp, proj, id_col, name_col = _ts_tables()
+    sql = f"""
+        SELECT
+            p.{name_col} AS project_name,
+            e.subject AS employee_name,
+            CAST(t.startdate AS DATE) AS work_date,
+            COUNT(*) AS entries,
+            SUM(t.effort) AS total_effort_minutes,
+            ROUND(CAST(SUM(t.effort) AS FLOAT) / 60.0, 1) AS total_hours
+        FROM {ts} t
+        JOIN {emp} e ON e.userid = t.assigntoid AND e.ownerid = t.ownerid
+        JOIN {proj} p ON p.{id_col} = t.projectid
+        WHERE {_ts_like("p." + name_col, "proj_name")}
+        GROUP BY p.{name_col}, e.subject, CAST(t.startdate AS DATE)
+        ORDER BY work_date DESC, employee_name
+    """
+    sql = _ts_limit(sql, limit)
+    try:
+        rows = _ts_fetch(sql, {"proj_name": f"%{project_name}%"})
+        return TimesheetSummaryResult(ok=True, rows=rows, count=len(rows))
+    except Exception as exc:
+        return TimesheetSummaryResult(ok=False, error=str(exc), note="Ensure timesheet, employee, and project tables exist.")
+
+
+def get_model_timesheet_summary(*, model_name: str, limit: int = 200) -> TimesheetSummaryResult:
+    """Timesheet entries grouped by engagement model/item (relatedtoname)."""
+    ts, emp, _, _, _ = _ts_tables()
+    sql = f"""
+        SELECT
+            t.relatedtoname AS model_name,
+            e.subject AS employee_name,
+            CAST(t.startdate AS DATE) AS work_date,
+            COUNT(*) AS entries,
+            SUM(t.effort) AS total_effort_minutes,
+            ROUND(CAST(SUM(t.effort) AS FLOAT) / 60.0, 1) AS total_hours
+        FROM {ts} t
+        JOIN {emp} e ON e.userid = t.assigntoid AND e.ownerid = t.ownerid
+        WHERE {_ts_like("t.relatedtoname", "model_name")}
+        GROUP BY t.relatedtoname, e.subject, CAST(t.startdate AS DATE)
+        ORDER BY work_date DESC, employee_name
+    """
+    sql = _ts_limit(sql, limit)
+    try:
+        rows = _ts_fetch(sql, {"model_name": f"%{model_name}%"})
+        return TimesheetSummaryResult(ok=True, rows=rows, count=len(rows))
+    except Exception as exc:
+        return TimesheetSummaryResult(ok=False, error=str(exc))
+
+
+def get_account_timesheet_summary(*, account_name: str, limit: int = 200) -> TimesheetSummaryResult:
+    """Timesheet hours grouped by project and employee for one account."""
+    ts, emp, proj, id_col, name_col = _ts_tables()
+    acct_col = get_project_account_name_column()
+    sql = f"""
+        SELECT
+            p.{acct_col} AS account_name,
+            p.{name_col} AS project_name,
+            e.subject AS employee_name,
+            SUM(t.effort) AS total_effort_minutes,
+            ROUND(CAST(SUM(t.effort) AS FLOAT) / 60.0, 1) AS total_hours
+        FROM {ts} t
+        JOIN {emp} e ON e.userid = t.assigntoid AND e.ownerid = t.ownerid
+        JOIN {proj} p ON p.{id_col} = t.projectid
+        WHERE {_ts_like("p." + acct_col, "account_name")}
+        GROUP BY p.{acct_col}, p.{name_col}, e.subject
+        ORDER BY account_name, project_name, employee_name
+    """
+    sql = _ts_limit(sql, limit)
+    try:
+        rows = _ts_fetch(sql, {"account_name": f"%{account_name}%"})
+        return TimesheetSummaryResult(ok=True, rows=rows, count=len(rows))
+    except Exception as exc:
+        return TimesheetSummaryResult(ok=False, error=str(exc))
+
+
+def get_portfolio_timesheet_summary(*, portfolio_name: str, limit: int = 200) -> TimesheetSummaryResult:
+    """Timesheet hours grouped by project and employee for one portfolio."""
+    ts, emp, proj, id_col, name_col = _ts_tables()
+    portfolio_col = get_project_portfolio_name_column()
+    sql = f"""
+        SELECT
+            p.{portfolio_col} AS portfolio_name,
+            p.{name_col} AS project_name,
+            e.subject AS employee_name,
+            SUM(t.effort) AS total_effort_minutes,
+            ROUND(CAST(SUM(t.effort) AS FLOAT) / 60.0, 1) AS total_hours
+        FROM {ts} t
+        JOIN {emp} e ON e.userid = t.assigntoid AND e.ownerid = t.ownerid
+        JOIN {proj} p ON p.{id_col} = t.projectid
+        WHERE {_ts_like("p." + portfolio_col, "portfolio_name")}
+        GROUP BY p.{portfolio_col}, p.{name_col}, e.subject
+        ORDER BY portfolio_name, project_name, employee_name
+    """
+    sql = _ts_limit(sql, limit)
+    try:
+        rows = _ts_fetch(sql, {"portfolio_name": f"%{portfolio_name}%"})
+        return TimesheetSummaryResult(ok=True, rows=rows, count=len(rows))
+    except Exception as exc:
+        return TimesheetSummaryResult(ok=False, error=str(exc))
+
+
+def get_org_timesheet_summary(*, limit: int = 200) -> TimesheetSummaryResult:
+    """Organisation-wide timesheet summary grouped by employee and project."""
+    ts, emp, proj, id_col, name_col = _ts_tables()
+    sql = f"""
+        SELECT
+            e.subject AS employee_name,
+            p.{name_col} AS project_name,
+            COUNT(*) AS entries,
+            SUM(t.effort) AS total_effort_minutes,
+            ROUND(CAST(SUM(t.effort) AS FLOAT) / 60.0, 1) AS total_hours
+        FROM {ts} t
+        JOIN {emp} e ON e.userid = t.assigntoid AND e.ownerid = t.ownerid
+        JOIN {proj} p ON p.{id_col} = t.projectid
+        GROUP BY e.subject, p.{name_col}
+        ORDER BY employee_name, project_name
+    """
+    sql = _ts_limit(sql, limit)
+    try:
+        rows = _ts_fetch(sql, {})
+        return TimesheetSummaryResult(ok=True, rows=rows, count=len(rows))
+    except Exception as exc:
+        return TimesheetSummaryResult(ok=False, error=str(exc))
+
+
+def get_pending_timesheet_report(*, limit: int = 200) -> TimesheetSummaryResult:
+    """Employees who have NOT submitted any timesheet entry for today."""
+    schema = DB_SCHEMA or "dbo"
+    ts = f"{schema}.timesheet"
+    emp = f"{schema}.employee"
+    db_type = _ts_db_type()
+    today_expr = "CURRENT_DATE" if db_type == "postgres" else "CAST(GETDATE() AS DATE)"
+    sql = f"""
+        SELECT e.subject AS employee_name
+        FROM {emp} e
+        WHERE NOT EXISTS (
+            SELECT 1 FROM {ts} t
+            WHERE t.assigntoid = e.userid
+              AND t.ownerid = e.ownerid
+              AND CAST(t.startdate AS DATE) = {today_expr}
+        )
+        ORDER BY e.subject
+    """
+    sql = _ts_limit(sql, limit)
+    try:
+        rows = _ts_fetch(sql, {})
+        return TimesheetSummaryResult(
+            ok=True, rows=rows, count=len(rows),
+            note="Employees with no timesheet entry submitted for today."
+        )
+    except Exception as exc:
+        return TimesheetSummaryResult(ok=False, error=str(exc))
